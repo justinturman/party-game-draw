@@ -1,9 +1,9 @@
 {
-  "id": "tic-tac-toe",
-  "name": "Tic-Tac-Toe",
-  "category": "Classics",
-  "description": "The classic. Three in a row wins.",
-  "summary": "Two players take turns marking squares on a 3×3 grid. The first to get three in a row, across, down or diagonally, wins. If the board fills with no line, it's a draw.",
+  "id": "draw",
+  "name": "Draw",
+  "category": "Party Games",
+  "description": "Sketch the secret word on your phone while everyone else races to guess it.",
+  "summary": "Each turn, one player picks a secret word and has 60 seconds to draw it on their phone. Everyone else watches the drawing appear live on the TV and types guesses on their own phones. The faster you guess, the more points you score, and the drawer scores for every correct guess. The secret word stays on the drawer's phone until the turn ends.",
   "thumbnail": "thumbnail.svg",
-  "color": "#2b2b6b"
+  "color": "#e65100"
 }
