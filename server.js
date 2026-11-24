@@ -16,21 +16,124 @@ const DRAWER_BONUS = 30;
 
 // Original word list
 export const WORDS = [
-  'apple', 'banana', 'pizza', 'hamburger', 'ice cream', 'cupcake', 'popcorn', 'pancake',
-  'spaghetti', 'watermelon', 'pineapple', 'carrot', 'sandwich', 'birthday cake', 'bicycle',
-  'airplane', 'helicopter', 'submarine', 'sailboat', 'hot air balloon', 'school bus',
-  'fire truck', 'train', 'rocket', 'umbrella', 'lighthouse', 'volcano', 'snowman',
-  'pirate ship', 'castle', 'rainbow', 'tornado', 'fireworks', 'campfire', 'tent',
-  'tree house', 'windmill', 'bridge', 'guitar', 'piano', 'drum', 'trumpet', 'elephant',
-  'giraffe', 'penguin', 'octopus', 'butterfly', 'spider', 'snail', 'kangaroo', 'crocodile',
-  'dolphin', 'owl', 'turtle', 'dragon', 'unicorn', 'mermaid', 'dinosaur', 'robot',
-  'astronaut', 'ghost', 'vampire', 'wizard', 'princess', 'knight', 'clown', 'dentist',
-  'chef', 'firefighter', 'scarecrow', 'backpack', 'skateboard', 'surfboard', 'kite',
-  'trampoline', 'swing', 'balloon', 'present', 'key', 'scissors', 'hammer', 'ladder',
-  'toothbrush', 'mirror', 'sunglasses', 'crown', 'sword', 'shield', 'treasure map',
-  'compass', 'telescope', 'light bulb', 'clock', 'bathtub', 'wheelbarrow', 'snowboard',
-  'basketball', 'bowling', 'fishing rod', 'hourglass', 'anchor', 'lantern', 'headphones',
-  'camera', 'suitcase', 'sunflower', 'cactus', 'mushroom', 'igloo', 'pyramid',
+  // --- Food & Drink ---
+  'apple', 'banana', 'pizza', 'hamburger', 'ice cream', 'cupcake', 'popcorn', 
+  'pancake', 'spaghetti', 'watermelon', 'pineapple', 'carrot', 'sandwich', 
+  'birthday cake', 'taco', 'hot dog', 'pretzel', 'donut', 'cookie', 'cheese', 
+  'egg', 'broccoli', 'cherry', 'lemon', 'milk', 'coffee', 'teapot', 
+  'lollipop', 'popsicle', 'avocado', 'pear', 'peach', 'strawberry', 'grapes', 
+  'corn', 'pumpkin', 'onion', 'potato', 'french fries', 'burrito', 
+  'sushi', 'waffle', 'bread', 'chocolate',
+  'pie', 'soup', 'fork', 'knife', 'spoon', 'plate', 
+  'olive', 'pickle', 'coconut', 'lemonade', 'muffin', 'bacon', 'meatball',
+  'fortune cookie', 'pepper', 'wine', 'milkshake', 'cereal', 'honey',
+
+  // --- Vehicles & Transport ---
+  'bicycle', 'airplane', 'helicopter', 'submarine', 'sailboat', 'hot air balloon', 
+  'school bus', 'fire truck', 'train', 'rocket', 'pirate ship', 'motorcycle', 
+  'tractor', 'canoe', 'skateboard', 'surfboard', 'snowboard', 'scooter', 'wagon', 
+  'ambulance', 'police car', 'taxi', 'garbage truck', 'bulldozer', 'cement mixer', 
+  'sports car', 'cruise ship', 'boat', 'blimp', 'parachute', 
+  'hang glider', 'spaceship', 'ufo', 'tank', 'chariot', 'sled', 'roller skates', 
+  'unicycle', 'dump truck', 'monster truck', 'double decker bus', 'kayak', 'jet ski', 'snowmobile', 'tow truck', 'limousine',
+
+  // --- Landmarks & Nature ---
+  'lighthouse', 'volcano', 'castle', 'rainbow', 'tornado', 
+  'fireworks', 'campfire', 'tent', 'tree house', 'windmill', 'bridge', 'igloo', 
+  'pyramid', 'cactus', 'mushroom', 'sunflower', 'mountain', 'island', 'waterfall', 
+  'cloud', 'sun', 'moon', 'star', 'cave', 'beach', 'forest', 'spider web', 'tunnel',
+  'canyon', 'desert', 'swamp', 'glacier', 'geyser', 'quicksand', 'coral', 
+  'lightning', 'meteor',
+  'cliff', 'crater', 'oasis',
+
+  // --- Animals ---
+  'elephant', 'giraffe', 'penguin', 'octopus', 'butterfly', 'spider', 'snail', 
+  'kangaroo', 'dolphin', 'owl', 'turtle', 'dragon', 'unicorn', 'mermaid', 'dinosaur', 
+  'monkey', 'lion', 'tiger', 'bear', 'rabbit', 'frog', 'duck', 'chicken', 'cow', 
+  'pig', 'horse', 'sheep', 'bee', 'ant', 'shark', 'whale', 'crab', 'starfish', 
+  'scorpion', 'peacock', 'flamingo', 'hedgehog', 'squirrel', 'zebra', 'rhino', 
+  'hippo', 'camel', 'polar bear', 'koala', 'panda', 'sloth', 'bat', 'eagle', 
+  'parrot', 'swan', 'pelican', 'seagull', 'ostrich', 'beaver', 'skunk', 'raccoon', 
+  'fox', 'wolf', 'deer', 'moose', 'walrus', 'seal', 'jellyfish', 'lobster', 
+  'pufferfish', 'swordfish', 'chameleon', 'lizard', 'snake', 't-rex', 
+  'centipede', 'ladybug', 'dragonfly', 
+  'porcupine', 'platypus', 
+  'gorilla','cheetah', 
+  'donkey', 
+  'rooster', 'turkey', 'pigeon', 'crow', 'hummingbird', 
+  'goldfish', 
+  
+
+  // --- People & Characters ---
+  'robot', 'astronaut', 'ghost', 'vampire', 'wizard', 'princess', 'knight', 'clown', 
+  'dentist', 'chef', 'firefighter', 'scarecrow', 'pirate', 'ninja', 'cowboy', 
+  'superhero', 'mummy', 'zombie', 'alien', 'king', 'queen', 'baby', 'doctor', 
+  'police officer', 'scientist', 'artist', 'musician', 'teacher', 'soldier', 
+  'detective', 'caveman', 'viking', 'fairy', 'genie', 'leprechaun', 'snowman', 
+  'santa claus', 'cupid', 'baker', 'barber', 'plumber', 'carpenter', 
+  'electrician', 'mechanic', 'farmer', 'pilot', 'sailor',
+  
+  // --- Household & Everyday Objects ---
+  'kite', 'trampoline', 'swing', 'balloon', 'present', 'key', 'scissors', 
+  'hammer', 'ladder', 'toothbrush', 'mirror', 'sunglasses', 'clock', 'bathtub', 
+  'wheelbarrow', 'anchor', 'lantern', 'headphones', 'camera', 'suitcase', 'broom', 
+  'mop', 'bucket', 'soap', 'towel', 'pillow', 'blanket', 'candle', 'lightbulb', 
+  'book', 'pencil', 'paintbrush', 'envelope', 'stamp', 'telephone', 'television', 
+  'computer', 'chair', 'table', 'door', 'window', 'fence',
+  'toaster', 'blender', 'microwave', 'refrigerator', 'washing machine',
+  'hair dryer', 'comb', 'toilet', 'frying pan', 'teacup', 'vase',
+  'picture frame', 'trash can', 'mailbox', 'basket',
+  'birdhouse', 'birdcage', 'doghouse', 'thermometer', 'scale',
+  'elevator', 'fireplace', 'chandelier', 'ceiling fan',
+  'rug', 'curtain', 'bookshelf', 'desk',
+  'notebook', 'calculator', 'printer','projector', 'microscope',
+  'globe', 'map', 'atlas', 'calendar', 
+  'stapler', 'tape dispenser', 'marker',
+
+  // --- Clothing & Accessories ---
+  'crown', 'hat', 'shoe', 'sock', 'glove', 'scarf', 'bow tie', 
+  'necklace', 'ring', 'watch', 'boot', 'dress', 'shirt', 'pants',
+  'mittens', 'swimsuit', 'raincoat', 'apron', 'belt', 'purse', 'wallet',
+  'briefcase', 'umbrella', 'backpack', 'wizard hat', 'cowboy hat', 'helmet',
+  'jacket', 'sweater', 'tie', 'slippers', 'flip flops', 'high heels', 'sandals',
+  'baseball cap', 'beanie', 'top hat', 'beret', 'veil', 'tiara', 'bracelet',
+  'earring', 'fanny pack',
+
+  // --- Sports & Games ---
+  'soccer ball', 'bowling ball', 'baseball bat', 'tennis racket', 
+  'golf club', 'pool', 'dice', 'chess', 'puzzle', 'trophy', 
+  'medal', 'fishing', 'dart', 'hula hoop', 'jump rope',
+  'ping pong', 'volleyball', 'hockey', 'boxing', 'whistle',
+  'stopwatch', 'scoreboard', 'net', 'goalpost', 'gym',
+  'treadmill',
+
+  // --- Music & Art ---
+  'guitar', 'piano', 'drum', 'trumpet', 'violin', 'microphone', 'music', 
+  'painting', 'easel','flute', 'harp', 'accordion',
+  'banjo','maracas', 'xylophone', 'boombox', 
+  'cello', 'tuba', 'trombone', 'clarinet', 
+  'harmonica',  'canvas', 'sculpture',
+
+  // --- Tools & Weapons ---
+  'sword', 'shield', 'treasure map', 'compass', 'telescope', 'magnifying glass', 
+  'flashlight', 'syringe', 'stethoscope', 'wrench', 'screwdriver', 'saw', 'shovel', 
+  'pickaxe', 'magnet', 'binoculars', 'hourglass', 'lock', 'chain', 'plunger',
+  'tape measure', 'toolbox', 'anvil', 'crowbar', 'fire extinguisher', 'safety pin',
+  'paperclip', 'rubber band', 'pushpin',
+  
+ 
+  // --- Mythical & Fantasy ---
+  'centaur', 'minotaur', 'cyclops', 'medusa', 'pegasus', 'phoenix', 
+  'werewolf', 'bigfoot', 'loch ness monster',
+  'sphinx', 
+ 'magic wand', 'crystal ball', 'cauldron', 'potion',
+  'magic lamp',
+
+  // --- Tricky Concepts (Easy to draw, fun to guess) ---
+  'echo', 'gravity', 'shadow', 'reflection', 'footprint', 'fingerprint',
+  'time', 'dream', 'nightmare', 'memory', 'sneeze', 'hiccup',
+  'yawn', 'blush', 'whisper', 'scream', 'silence', 'taste', 'smell',
+  'tickle', 'balance', 'electricity'
 ];
 
 // ---- Helpers ----
