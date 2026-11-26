@@ -2,8 +2,9 @@
   "id": "draw",
   "name": "Draw",
   "category": "Party Games",
-  "description": "Sketch the secret word on your phone while everyone else races to guess it.",
-  "summary": "Each turn, one player picks a secret word and has 60 seconds to draw it on their phone. Everyone else watches the drawing appear live on the TV and types guesses on their own phones. The faster you guess, the more points you score, and the drawer scores for every correct guess. The secret word stays on the drawer's phone until the turn ends.",
+  "description": "Sketch the secret word on your phone while everyone else races to guess it. Guess it first and you draw next.",
+  "summary": "One player picks a secret word and has 60 seconds to draw it on their phone. Everyone else watches the drawing appear live on the TV and types guesses on their own phones. The first person to guess it wins the round, scores more the faster they were, and becomes the next player to draw. If nobody gets it, the turn moves on to the next player. There is no end: play as long as you like. Players can join or leave at any time.",
   "thumbnail": "thumbnail.jpg",
-  "color": "#e65100"
+  "color": "#e65100",
+  "openJoin": true
 }

@@ -6,7 +6,6 @@
   const CH = 480;
   const MAX_POINTS = 2500;
   const MAX_CHUNK = 80;
-  const DRAWER_BONUS = 30;
   const COLORS = ['#111111', '#ffffff', '#e53935', '#fb8c00', '#fdd835', '#43a047', '#1e88e5', '#8e24aa', '#6d4c41', '#ec407a'];
   const WIDTHS = [4, 10, 22];
 
@@ -16,15 +15,17 @@
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
     );
   const send = (name, ...args) => parent.postMessage({ type: 'move', name, args }, '*');
-  const nm = (names, id) => esc(names[id] || `Player ${Number(id) + 1}`);
+  const nm = (names, id) => esc((names && names[id]) || `Player ${Number(id) + 1}`);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const $ = (id) => document.getElementById(id);
 
   let last = null; // the most recent message from the platform
   let layoutKey = null; // which screen layout is currently built
   let nudgeAt = 0;
+  let hereAt = 0; // when we last said "I'm here"
+  let awayAt = 0; // when we first noticed the drawer had gone
   const tool = { color: 0, width: 1 };
-  let mirror = { turn: -1, strokes: [] }; // the drawer's own copy of the drawing
+  let mirror = { round: -1, strokes: [] }; // the drawer's own copy of the drawing
   const deadlines = {}; // timer id -> the local time when it ends
 
   // ---------------- Clock ----------------
@@ -55,23 +56,51 @@
       } else {
         const s = Math.max(0, Math.ceil(r / 1000));
         clock.textContent = `⏱ ${s}`;
-        clock.classList.toggle('low', s <= 10);
+        clock.classList.toggle('low', s <= 10 && S.timer.kind !== 'recap');
       }
     }
-    if (last.view === 'player' && S.role !== 'spectator' && S.timer && r !== null) {
-      const stagger = 300 + 300 * Number(last.playerID); // seats take turns asking
-      if (r <= -stagger && Date.now() >= nudgeAt) {
-        if (S.timer.kind === 'draw') {
-          nudgeAt = Date.now() + 3000;
-          send('endTurn');
-        } else if (S.timer.kind === 'choose' && S.role !== 'drawer') {
-          nudgeAt = Date.now() + 3000;
-          send('passTurn');
-        }
+    if (last.view !== 'player' || S.role === 'spectator' || Date.now() < nudgeAt) return;
+
+    // players take turns asking, so the server is not asked 16 times at once
+    const slot = 300 + 300 * Math.max(0, S.present.indexOf(last.playerID));
+    let go = null;
+    if (S.timer && r !== null && r <= -slot) {
+      if (S.timer.kind === 'recap') go = ['nextTurn', S.round];
+      else if (S.timer.kind === 'draw') go = ['endTurn'];
+      else if (S.timer.kind === 'choose' && S.role !== 'drawer') go = ['passTurn'];
+    }
+    // a drawer who has gone away should not hold everyone up
+    if (!go && S.drawerAway && S.role !== 'drawer') {
+      if (!awayAt) awayAt = Date.now();
+      if (Date.now() - awayAt >= slot) {
+        if (S.phase === 'drawing') go = ['endTurn'];
+        else if (S.phase === 'choosing') go = ['passTurn'];
       }
+    } else if (!S.drawerAway) {
+      awayAt = 0;
+    }
+    if (go) {
+      nudgeAt = Date.now() + 3000;
+      send(...go);
     }
   }
   setInterval(tick, 250);
+
+  // ---------------- "I'm here" ----------------
+  // The server cannot see who is connected, so each phone says so every few seconds.
+  // Until it shows up in the list of players who are here, it says so more often
+  // (a message can be refused when the room is busy).
+  function heartbeat() {
+    if (!last || last.view !== 'player') return;
+    const S = last.state.G;
+    if (S.role === 'spectator') return;
+    const gap = S.present.includes(last.playerID) ? 8000 : 1500;
+    if (Date.now() - hereAt >= gap) {
+      hereAt = Date.now();
+      send('here');
+    }
+  }
+  setInterval(heartbeat, 500);
 
   // ---------------- Reliable sending ----------------
   // Drawing and guessing moves carry a sequence number. We send one at a time and
@@ -149,7 +178,7 @@
   const usedPoints = () => mirror.strokes.reduce((n, s) => n + s.p.length / 2, 0);
 
   function syncMirror(S) {
-    if (mirror.turn !== S.turn) mirror = { turn: S.turn, strokes: JSON.parse(JSON.stringify(S.strokes)) };
+    if (mirror.round !== S.round) mirror = { round: S.round, strokes: JSON.parse(JSON.stringify(S.strokes)) };
   }
 
   // The drawer's canvas: draws on the spot, and sends the strokes in the background
@@ -218,18 +247,21 @@
 
   const hintText = (h) => (h ? [...h].join(' ') : '');
 
+  // The scoreboard: everyone here, plus anyone who left with points (dimmed)
   function chips(S, names) {
-    const ids = [...S.players].sort((a, b) => S.scores[b] - S.scores[a]);
-    const playing = S.phase !== 'gameover';
+    const ids = [...S.players].sort((a, b) => (S.scores[b] || 0) - (S.scores[a] || 0));
+    if (!ids.length) return '';
+    const inRound = S.phase === 'choosing' || S.phase === 'drawing';
     return (
       '<div class="chips">' +
       ids
         .map((id) => {
-          const isDrawer = playing && id === S.drawer;
-          const done = playing && S.guessed[id] !== undefined;
-          return `<div class="chip${isDrawer ? ' drawer' : ''}${done ? ' done' : ''}">${
-            isDrawer ? '✏️ ' : done ? '✅ ' : ''
-          }${nm(names, id)}: <strong>${S.scores[id]}</strong></div>`;
+          const away = !S.present.includes(id);
+          const isDrawer = inRound && id === S.drawer;
+          const won = S.phase === 'turnEnd' && S.recap && S.recap.winner === id;
+          return `<div class="chip${isDrawer ? ' drawer' : ''}${won ? ' done' : ''}${away ? ' away' : ''}">${
+            isDrawer ? '✏️ ' : won ? '🏆 ' : ''
+          }${nm(names, id)}: <strong>${S.scores[id] || 0}</strong></div>`;
         })
         .join('') +
       '</div>'
@@ -246,37 +278,51 @@
     return `<ul class="chat">${items.join('')}</ul>`;
   }
 
+  // The result of a round: who won, and what everyone earned
   function recapHTML(S, names) {
     const r = S.recap;
-    if (!r || r.turn !== S.turn) return '';
-    const rows = r.got.map((x) => `<li class="good">✅ ${nm(names, x.who)} +${x.pts}</li>`).join('');
-    const bonus = r.got.length ? `<li>✏️ ${nm(names, r.drawer)} +${DRAWER_BONUS * r.got.length}</li>` : '';
-    return `<h3>${r.got.length ? 'Who got it' : 'Nobody got it 😅'}</h3><ul class="chat">${rows}${bonus}</ul>`;
+    if (!r || r.round !== S.round || S.phase !== 'turnEnd') return '';
+    if (r.winner !== null) {
+      return `<h3>${nm(names, r.winner)} got it! 🎉</h3><ul class="chat">
+        <li class="good">✅ ${nm(names, r.winner)} +${r.pts}</li>
+        <li>✏️ ${nm(names, r.drawer)} +${r.drawerPts}</li></ul>`;
+    }
+    const why = r.reason === 'left' ? `${nm(names, r.drawer)} stepped away.` : 'Nobody got it 😅';
+    return `<h3>${why}</h3>`;
+  }
+
+  function upNextHTML(S, names, playerID) {
+    if (S.upNext === null || S.upNext === undefined) return '';
+    if (S.upNext === playerID) return '<p class="turnnote">🎨 You draw next!</p>';
+    return `<p class="turnnote">✏️ ${nm(names, S.upNext)} draws next</p>`;
   }
 
   function passedNotice(S, names) {
     const r = S.recap;
-    if (r && r.passed && r.turn === S.turn - 1) {
+    if (r && r.reason === 'passed' && r.round === S.round - 1) {
       return `<p class="progress">${nm(names, r.drawer)} took too long and was skipped.</p>`;
     }
     return '';
   }
 
-  // ---------------- TV, spectators, and the final screen ----------------
+  // ---------------- TV and spectators ----------------
   function publicScreen(S, names) {
-    if (S.phase === 'gameover') {
-      layout('over', '<div id="over"></div>');
-      const best = Math.max(...Object.values(S.scores));
-      const w = S.players.filter((id) => S.scores[id] === best);
-      const title =
-        w.length === 1
-          ? `${nm(names, w[0])} wins! 🎉`
-          : `It's a tie: ${w.map((id) => nm(names, id)).join(', ')}`;
-      $('over').innerHTML = `<h1>${title}</h1>${chips(S, names)}`;
+    if (S.phase === 'waiting') {
+      layout(
+        'tv:wait',
+        `<h1>Draw</h1><h2>Waiting for players…</h2>
+         <p class="waiting" id="wmsg"></p>
+         <div id="scores"></div>`
+      );
+      $('wmsg').innerHTML =
+        S.present.length === 0
+          ? 'Join on your phone. Anyone can join or leave at any time.'
+          : `${nm(names, S.upNext)} will draw first. The game starts as soon as a second player joins.`;
+      $('scores').innerHTML = chips(S, names);
       return;
     }
     layout(
-      `tv:${S.phase}:${S.turn}`,
+      `tv:${S.phase}:${S.round}`,
       `<h1>Draw</h1>
        <div id="headline"></div>
        <div class="bigclock" id="clock"></div>
@@ -288,51 +334,54 @@
        <div id="scores"></div>`
     );
     const who = nm(names, S.drawer);
-    if (S.phase === 'choosing') $('headline').innerHTML = `<h2>🎨 ${who} is choosing a word…</h2>`;
-    else if (S.phase === 'drawing') $('headline').innerHTML = `<h2>✏️ ${who} is drawing. Guess on your phone!</h2>`;
-    else $('headline').innerHTML = `<h2>The word was <span class="word">${esc(S.word)}</span></h2>`;
+    if (S.phase === 'choosing') {
+      $('headline').innerHTML = `<h2>🎨 ${who} is choosing a word…</h2>` + (S.drawerAway ? '<p class="progress">They seem to be away.</p>' : '');
+    } else if (S.phase === 'drawing') {
+      $('headline').innerHTML = `<h2>✏️ ${who} is drawing. Guess on your phone!</h2><p class="progress">First to guess it wins, and draws next.</p>`;
+    } else {
+      $('headline').innerHTML = `<h2>The word was <span class="word">${esc(S.word)}</span></h2>`;
+    }
     $('hint').textContent = S.phase === 'drawing' ? hintText(S.hint) : '';
     paintAll($('cv'), S.strokes);
     $('side').innerHTML =
       S.phase === 'turnEnd'
-        ? `${recapHTML(S, names)}<p class="waiting">Tap “Next turn” on any phone.</p>`
+        ? `${recapHTML(S, names)}${upNextHTML(S, names, null)}`
         : passedNotice(S, names) + chatHTML(S, names, 12);
     $('scores').innerHTML = chips(S, names);
   }
 
-  // ---------------- Phone: the end of a turn (everyone) ----------------
-  function endScreen(S, names) {
-    const turn = S.turn;
+  // ---------------- Phone: waiting for company ----------------
+  function waitScreen(S, names, playerID) {
+    layout('p:wait', `<h2>Draw</h2><p class="waiting" id="wmsg"></p><div id="scores"></div>`);
+    $('wmsg').innerHTML =
+      S.upNext === playerID
+        ? "You're in! You'll draw first. The game starts as soon as another player joins."
+        : 'Waiting for another player to join…';
+    $('scores').innerHTML = chips(S, names);
+  }
+
+  // ---------------- Phone: the end of a round (everyone) ----------------
+  function endScreen(S, names, playerID) {
     layout(
-      `p:end:${turn}`,
-      `<h2>Time's up! ⏰</h2>
-       <p>The word was <span class="word" id="w"></span></p>
+      `p:end:${S.round}`,
+      `<h2>The word was <span class="word" id="w"></span></h2>
        <canvas id="cv" class="view" width="${CW}" height="${CH}"></canvas>
        <div id="recap"></div>
-       <div id="scores"></div>
-       <p><button id="next" class="big"></button></p>`,
-      () => {
-        const next = $('next');
-        next.textContent = turn + 1 >= S.totalTurns ? 'See final scores' : 'Next turn';
-        next.onclick = () => {
-          next.disabled = true;
-          send('nextTurn', turn);
-          setTimeout(() => {
-            if (next.isConnected) next.disabled = false; // refused, so let them try again
-          }, 2500);
-        };
-      }
+       <div id="upnext"></div>
+       <div class="bigclock" id="clock"></div>
+       <div id="scores"></div>`
     );
     $('w').textContent = S.word;
     paintAll($('cv'), S.strokes);
     $('recap').innerHTML = recapHTML(S, names);
+    $('upnext').innerHTML = upNextHTML(S, names, playerID);
     $('scores').innerHTML = chips(S, names);
   }
 
   // ---------------- Phone: the drawer ----------------
   function drawerChoose(S) {
     layout(
-      `p:choose:${S.turn}`,
+      `p:choose:${S.round}`,
       `<h2>Your turn to draw! 🎨</h2>
        <div class="bigclock" id="clock"></div>
        <p>Pick a word:</p>
@@ -354,9 +403,9 @@
     );
   }
 
-  function drawerDraw(S, names) {
+  function drawerDraw(S) {
     layout(
-      `p:draw:${S.turn}`,
+      `p:draw:${S.round}`,
       `<div class="top slim"><span class="clock" id="clock"></span><span class="word">${esc(S.word || '')}</span></div>
        <canvas id="cv" class="ph" width="${CW}" height="${CH}"></canvas>
        <div class="tools">${COLORS.map(
@@ -402,33 +451,33 @@
         };
       }
     );
-    const guessed = Object.keys(S.guessed).length;
+    const guessers = Math.max(0, S.present.length - 1);
     $('inkfill').style.width = `${Math.round(S.ink * 100)}%`;
     $('info').textContent =
       (S.ink >= 0.98 ? 'Out of ink! Undo or clear to keep drawing. ' : '') +
-      `${guessed} of ${S.players.length - 1} have guessed`;
+      `${guessers} ${guessers === 1 ? 'player is' : 'players are'} guessing`;
   }
 
   // ---------------- Phone: a guesser ----------------
-  function guesserScreen(S, names, playerID) {
+  function guesserScreen(S, names) {
     const who = nm(names, S.drawer);
     if (S.phase === 'choosing') {
       layout(
-        `p:wait:${S.turn}`,
+        `p:wait:${S.round}`,
         `<h2 id="h"></h2><div class="bigclock" id="clock"></div><div id="scores"></div>`
       );
-      $('h').innerHTML = `🎨 ${who} is choosing a word…`;
+      $('h').innerHTML = `🎨 ${who} is choosing a word…` + (S.drawerAway ? '<br><small>(they seem to be away)</small>' : '');
       $('scores').innerHTML = passedNotice(S, names) + chips(S, names);
       return;
     }
     layout(
-      `p:guess:${S.turn}`,
+      `p:guess:${S.round}`,
       `<div class="top slim"><span class="clock" id="clock"></span><span id="who"></span></div>
        <div class="hint" id="hint"></div>
        <canvas id="cv" class="view" width="${CW}" height="${CH}"></canvas>
+       <p class="progress">First to guess it wins, and draws next! ✏️</p>
        <div id="guessbox"><input id="gin" maxlength="40" autocomplete="off" autocapitalize="none" placeholder="Type your guess" />
          <button id="gsend">Guess</button></div>
-       <p id="msg" class="good"></p>
        <div id="chat"></div>
        <div id="scores"></div>`,
       () => {
@@ -449,12 +498,9 @@
         });
       }
     );
-    const got = S.guessed[playerID];
     $('who').innerHTML = `✏️ ${who}`;
     $('hint').textContent = hintText(S.hint);
     paintAll($('cv'), S.strokes);
-    $('guessbox').hidden = got !== undefined;
-    $('msg').textContent = got !== undefined ? `✅ You got it! +${got}` : '';
     $('chat').innerHTML = chatHTML(S, names, 6);
     $('scores').innerHTML = chips(S, names);
   }
@@ -466,11 +512,14 @@
     const S = state.G;
     track(S);
     const mine = view === 'player' && S.role !== 'spectator';
+    if (view !== 'player') hereAt = 0; // say "I'm here" again as soon as this phone goes back to its own screen
     if (mine) relAck(S.mySeq);
-    if (!mine || S.phase === 'gameover') publicScreen(S, names);
-    else if (S.phase === 'turnEnd') endScreen(S, names);
+    heartbeat(); // a phone that has just opened says so at once
+    if (!mine) publicScreen(S, names);
+    else if (S.phase === 'waiting') waitScreen(S, names, playerID);
+    else if (S.phase === 'turnEnd') endScreen(S, names, playerID);
     else if (S.role === 'drawer') (S.phase === 'choosing' ? drawerChoose : drawerDraw)(S, names);
-    else guesserScreen(S, names, playerID);
+    else guesserScreen(S, names);
     tick();
   }
 

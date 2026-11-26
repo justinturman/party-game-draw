@@ -53,3 +53,7 @@ canvas.tv { width: min(100%, calc(64vh * 4 / 3)); }
 
 ul.chat { list-style: none; padding: 0; margin: 0.4rem auto; max-width: 420px; text-align: left; }
 ul.chat li { margin: 3px 0; }
+/* ---- Open room: players come and go ---- */
+.chip.away { opacity: 0.45; }
+.turnnote { font-size: 1.3rem; font-weight: bold; color: #ffd54f; margin: 0.6rem 0; }
+.side h3, #side h3 { margin: 0.3rem 0; }

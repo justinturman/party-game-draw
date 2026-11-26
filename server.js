@@ -1,7 +1,12 @@
 const INVALID_MOVE = 'INVALID_MOVE';
 
 // Timings. Exported so the tests can shorten them.
-export const config = { drawMs: 60000, chooseMs: 25000 };
+export const config = {
+  drawMs: 60000, // time to draw
+  chooseMs: 25000, // time for the drawer to pick a word
+  recapMs: 8000, // how long the result of a round is shown
+  presenceMs: 26000, // a phone not heard from for this long counts as away
+};
 
 // The canvas and its limits. view.js has copies of these numbers.
 export const CANVAS = { w: 640, h: 480 };
@@ -11,8 +16,7 @@ const MAX_STROKES = 250;
 const MAX_POINTS = 2500;
 const MAX_CHUNK = 80; // numbers (x,y pairs) in one drawing move
 const MAX_GUESS_LEN = 40;
-const MAX_GUESSES = 40; // per player per turn
-const DRAWER_BONUS = 30;
+const MAX_GUESSES = 40; // per player per round
 
 // Original word list
 export const WORDS = [
@@ -158,8 +162,44 @@ function distance(a, b) {
   return prev[b.length];
 }
 
-const seated = (G, id) => G.players.includes(id);
+const isSeat = (G, id) => typeof id === 'string' && /^\d+$/.test(id) && Number(id) < G.seats;
 const live = (G) => G.phase === 'drawing' && Date.now() < G.endsAt;
+
+// ---- Who is here? ----
+// The server cannot see who is connected, so every phone sends a small "I'm here"
+// now and then (and every move counts as one). A seat not heard from for a while
+// is treated as away. Players are kept in the order they first showed up.
+const presentIds = (G) => {
+  const now = Date.now();
+  return G.order.filter((id) => now - (G.seen[id] || 0) < config.presenceMs);
+};
+const isPresent = (G, id) => presentIds(G).includes(id);
+
+function touch(G, id) {
+  if (!isSeat(G, id)) return false;
+  G.seen[id] = Date.now();
+  if (!G.order.includes(id)) G.order.push(id);
+  return true;
+}
+
+// The next player who is here, after `id` in joining order (wrapping round).
+// With no `id`, that is simply whoever joined first and is still here.
+function nextPresent(G, id) {
+  const here = presentIds(G);
+  if (here.length === 0) return null;
+  const start = G.order.indexOf(id);
+  for (let k = 1; k <= G.order.length; k++) {
+    const candidate = G.order[(start + k) % G.order.length];
+    if (here.includes(candidate)) return candidate;
+  }
+  return here[0];
+}
+
+// `want` draws if they are still here, otherwise whoever comes after them
+function pickDrawer(G, want) {
+  if (want && isPresent(G, want)) return want;
+  return nextPresent(G, want);
+}
 
 // Drawing and guessing moves carry a sequence number, so a move that is resent
 // after a lost reply is only ever applied once, and always in order.
@@ -174,8 +214,11 @@ function addLog(G, entry) {
   if (G.log.length > 40) G.log.splice(0, G.log.length - 40);
 }
 
-function startTurn(G, random) {
-  G.drawer = G.players[G.turn % G.players.length];
+// ---- Rounds ----
+function startTurn(G, random, drawer) {
+  G.round += 1;
+  G.drawer = drawer;
+  G.planned = null;
   if (G.deck.length < 3) G.deck = random.Shuffle(WORDS.map((_, i) => i));
   G.options = [G.deck.pop(), G.deck.pop(), G.deck.pop()].map((i) => WORDS[i]);
   G.word = null;
@@ -184,30 +227,41 @@ function startTurn(G, random) {
   G.endsAt = null;
   G.strokes = [];
   G.points = 0;
-  G.guessed = {};
   G.guesses = {};
   G.log = [];
 }
 
-function advance(G, random) {
-  G.turn += 1;
-  if (G.turn >= G.totalTurns) {
-    G.phase = 'gameover';
-    G.word = null;
+// Start the next round, or wait for company if nobody else is here
+function advance(G, random, want) {
+  const drawer = pickDrawer(G, want);
+  if (!drawer || presentIds(G).length < 2) {
+    G.phase = 'waiting';
+    G.planned = drawer || want || null;
+    G.drawer = null;
     G.options = [];
+    G.word = null;
     G.endsAt = null;
+    G.strokes = [];
+    G.points = 0;
+    G.log = [];
     return;
   }
-  startTurn(G, random);
+  startTurn(G, random, drawer);
 }
 
-function finishTurn(G) {
+// win is { who, pts, drawerPts } when someone guessed it
+function finishRound(G, win, reason) {
   G.recap = {
-    turn: G.turn,
+    round: G.round,
     drawer: G.drawer,
     word: G.word,
-    got: Object.keys(G.guessed).map((who) => ({ who, pts: G.guessed[who] })),
-    passed: false,
+    winner: win ? win.who : null,
+    pts: win ? win.pts : 0,
+    drawerPts: win ? win.drawerPts : 0,
+    reason, // 'guessed' | 'time' | 'left'
+    // The guesser who won draws next. If nobody did, the turn moves round the room.
+    next: win ? win.who : nextPresent(G, G.drawer),
+    endAt: Date.now(),
   };
   G.phase = 'turnEnd';
   G.endsAt = null;
@@ -236,48 +290,55 @@ function addChunk(G, chunk) {
 
 export const game = {
   name: 'draw',
-  minPlayers: 2,
-  maxPlayers: 10,
+  // There is no fixed player count: the room has 16 seats and people simply fill
+  // them as they arrive (the platform's "Start" button, openJoin).
+  minPlayers: 16,
+  maxPlayers: 16,
 
-  // Everyone acts at the same time (guessing, ending a turn).
+  // Everyone acts at the same time (guessing, moving on).
   // Each move checks for itself who is allowed to make it.
   turn: { activePlayers: { all: null } },
 
-  setup: ({ ctx, random }) => {
-    const players = Array.from({ length: ctx.numPlayers }, (_, i) => String(i));
-    const scores = {};
-    for (const id of players) scores[id] = 0;
-    const rounds = ctx.numPlayers <= 5 ? 2 : 1;
-    const G = {
-      phase: 'choosing', // choosing -> drawing -> turnEnd -> ... -> gameover
-      players,
-      scores,
-      turn: 0,
-      totalTurns: players.length * rounds,
-      deck: random.Shuffle(WORDS.map((_, i) => i)), // never sent to any device
-      drawer: null,
-      options: [],
-      word: null, // the secret word
-      chooseBy: null,
-      endsAt: null,
-      strokes: [],
-      points: 0,
-      guessed: {}, // id -> points scored this turn
-      guesses: {}, // id -> how many guesses this turn
-      log: [],
-      seqs: {},
-      recap: null,
-    };
-    startTurn(G, random);
-    return G;
-  },
+  setup: ({ ctx, random }) => ({
+    phase: 'waiting', // waiting -> choosing -> drawing -> turnEnd -> choosing -> ... (it never ends)
+    seats: ctx.numPlayers,
+    order: [], // seats in the order they first showed up
+    seen: {}, // seat -> the last time we heard from it
+    scores: {}, // seat -> points; kept when someone leaves
+    round: 0,
+    planned: null, // who draws as soon as there are two players
+    deck: random.Shuffle(WORDS.map((_, i) => i)), // never sent to any device
+    drawer: null,
+    options: [],
+    word: null, // the secret word
+    chooseBy: null,
+    endsAt: null,
+    strokes: [],
+    points: 0,
+    guesses: {}, // id -> how many guesses this round
+    log: [],
+    seqs: {},
+    recap: null,
+  }),
 
   moves: {
+    // "I'm here." Also starts the very first round once a second player has arrived.
+    here: {
+      client: false,
+      move: ({ G, playerID, random }) => {
+        if (!touch(G, playerID)) return INVALID_MOVE;
+        if (G.scores[playerID] === undefined) G.scores[playerID] = 0;
+        if (G.phase === 'waiting' && presentIds(G).length >= 2) {
+          startTurn(G, random, pickDrawer(G, G.planned));
+        }
+      },
+    },
+
     // The drawer picks one of three words and the clock starts
     choose: {
       client: false,
       move: ({ G, playerID }, index) => {
-        if (G.phase !== 'choosing' || playerID !== G.drawer) return INVALID_MOVE;
+        if (G.phase !== 'choosing' || !touch(G, playerID) || playerID !== G.drawer) return INVALID_MOVE;
         if (!Number.isInteger(index) || index < 0 || index >= G.options.length) return INVALID_MOVE;
         G.word = G.options[index];
         G.options = [];
@@ -289,7 +350,7 @@ export const game = {
     draw: {
       client: false,
       move: ({ G, playerID }, seq, chunk) => {
-        if (!live(G) || playerID !== G.drawer) return INVALID_MOVE;
+        if (!live(G) || !touch(G, playerID) || playerID !== G.drawer) return INVALID_MOVE;
         if (!takeSeq(G, playerID, seq)) return INVALID_MOVE;
         addChunk(G, chunk);
       },
@@ -298,7 +359,7 @@ export const game = {
     undo: {
       client: false,
       move: ({ G, playerID }, seq) => {
-        if (!live(G) || playerID !== G.drawer) return INVALID_MOVE;
+        if (!live(G) || !touch(G, playerID) || playerID !== G.drawer) return INVALID_MOVE;
         if (!takeSeq(G, playerID, seq)) return INVALID_MOVE;
         const last = G.strokes.pop();
         if (last) G.points -= last.p.length / 2;
@@ -308,20 +369,20 @@ export const game = {
     clear: {
       client: false,
       move: ({ G, playerID }, seq) => {
-        if (!live(G) || playerID !== G.drawer) return INVALID_MOVE;
+        if (!live(G) || !touch(G, playerID) || playerID !== G.drawer) return INVALID_MOVE;
         if (!takeSeq(G, playerID, seq)) return INVALID_MOVE;
         G.strokes = [];
         G.points = 0;
       },
     },
 
-    // A guess. Right answers are scored and announced without the word.
+    // A guess. The first right answer wins the round: the guesser scores more the
+    // faster they were, the drawer earns half as much, and the guesser draws next.
     guess: {
       client: false,
       move: ({ G, playerID }, seq, text) => {
-        if (!live(G) || !seated(G, playerID) || playerID === G.drawer) return INVALID_MOVE;
+        if (!live(G) || !touch(G, playerID) || playerID === G.drawer) return INVALID_MOVE;
         if (!takeSeq(G, playerID, seq)) return INVALID_MOVE;
-        if (G.guessed[playerID] !== undefined) return;
         if (typeof text !== 'string') return;
         const guess = text.trim();
         if (!guess || guess.length > MAX_GUESS_LEN) return;
@@ -333,11 +394,11 @@ export const game = {
         if (g === w) {
           const left = Math.max(0, G.endsAt - Date.now());
           const pts = 50 + Math.round((100 * left) / config.drawMs);
-          G.guessed[playerID] = pts;
-          G.scores[playerID] += pts;
-          G.scores[G.drawer] += DRAWER_BONUS;
+          const drawerPts = Math.round(pts / 2);
+          G.scores[playerID] = (G.scores[playerID] || 0) + pts;
+          G.scores[G.drawer] = (G.scores[G.drawer] || 0) + drawerPts;
           addLog(G, { type: 'got', who: playerID, pts });
-          if (G.players.every((id) => id === G.drawer || G.guessed[id] !== undefined)) finishTurn(G);
+          finishRound(G, { who: playerID, pts, drawerPts }, 'guessed');
         } else if (g.length >= 4 && distance(g, w) <= 1) {
           addLog(G, { type: 'close', who: playerID }); // the text stays hidden
         } else {
@@ -346,52 +407,63 @@ export const game = {
       },
     },
 
-    // When time is up, any player may end the turn (the server checks the clock itself)
+    // When time is up, or the drawer has gone, any player may end the round.
+    // The server checks the clock and who is here for itself.
     endTurn: {
       client: false,
       move: ({ G, playerID }) => {
-        if (G.phase !== 'drawing' || !seated(G, playerID)) return INVALID_MOVE;
-        if (Date.now() < G.endsAt) return INVALID_MOVE;
-        finishTurn(G);
+        if (G.phase !== 'drawing' || !touch(G, playerID)) return INVALID_MOVE;
+        const timeUp = Date.now() >= G.endsAt;
+        const drawerGone = playerID !== G.drawer && !isPresent(G, G.drawer);
+        if (!timeUp && !drawerGone) return INVALID_MOVE;
+        finishRound(G, null, timeUp ? 'time' : 'left');
       },
     },
 
-    // Any player moves on. The turn number stops a late second tap skipping a turn.
+    // Any player moves on after the result has been shown. The round number stops
+    // a late second request skipping a round.
     nextTurn: {
       client: false,
-      move: ({ G, playerID, random }, turn) => {
-        if (G.phase !== 'turnEnd' || !seated(G, playerID) || turn !== G.turn) return INVALID_MOVE;
-        advance(G, random);
+      move: ({ G, playerID, random }, round) => {
+        if (G.phase !== 'turnEnd' || !touch(G, playerID) || round !== G.round) return INVALID_MOVE;
+        if (Date.now() - G.recap.endAt < config.recapMs) return INVALID_MOVE;
+        advance(G, random, G.recap.next);
       },
     },
 
-    // If the drawer takes too long to choose, anyone else can skip their turn
+    // If the drawer takes too long to choose (or has gone), anyone else can skip them
     passTurn: {
       client: false,
       move: ({ G, playerID, random }) => {
-        if (G.phase !== 'choosing' || !seated(G, playerID) || playerID === G.drawer) return INVALID_MOVE;
-        if (Date.now() < G.chooseBy) return INVALID_MOVE;
-        G.recap = { turn: G.turn, drawer: G.drawer, word: null, got: [], passed: true };
-        advance(G, random);
+        if (G.phase !== 'choosing' || !touch(G, playerID) || playerID === G.drawer) return INVALID_MOVE;
+        if (Date.now() < G.chooseBy && isPresent(G, G.drawer)) return INVALID_MOVE;
+        G.recap = {
+          round: G.round, drawer: G.drawer, word: null, winner: null, pts: 0, drawerPts: 0,
+          reason: 'passed', next: null, endAt: Date.now(),
+        };
+        advance(G, random, nextPresent(G, G.drawer));
       },
     },
   },
 
   // THE PRIVACY RULES:
   //  - the word options are sent only to the drawer, while choosing
-  //  - the secret word is sent only to the drawer while drawing, and to everyone once the turn ends
+  //  - the secret word is sent only to the drawer while drawing, and to everyone once the round ends
   //  - everyone else gets only the shape of the word, like "___ ____"
   //  - the deck and the deadlines are never sent (only the time left)
   playerView: ({ G, playerID }) => {
-    const isPlayer = playerID !== null && playerID !== undefined && seated(G, playerID);
-    const role = !isPlayer ? 'spectator' : playerID === G.drawer ? 'drawer' : 'guesser';
     const now = Date.now();
+    const here = presentIds(G);
+    const isPlayer = playerID !== null && playerID !== undefined && isSeat(G, playerID);
+    const role = !isPlayer ? 'spectator' : playerID === G.drawer ? 'drawer' : 'guesser';
 
     let timer = null;
     if (G.phase === 'choosing') {
-      timer = { id: `c${G.turn}`, kind: 'choose', left: Math.max(0, G.chooseBy - now) };
+      timer = { id: `c${G.round}`, kind: 'choose', left: Math.max(0, G.chooseBy - now) };
     } else if (G.phase === 'drawing') {
-      timer = { id: `d${G.turn}`, kind: 'draw', left: Math.max(0, G.endsAt - now) };
+      timer = { id: `d${G.round}`, kind: 'draw', left: Math.max(0, G.endsAt - now) };
+    } else if (G.phase === 'turnEnd') {
+      timer = { id: `r${G.round}`, kind: 'recap', left: Math.max(0, G.recap.endAt + config.recapMs - now) };
     }
 
     let word = null;
@@ -403,13 +475,30 @@ export const game = {
       word = G.word;
     }
 
+    // who draws next, once the result is in or while we wait for company
+    let upNext = null;
+    if (G.phase === 'turnEnd') upNext = pickDrawer(G, G.recap.next);
+    else if (G.phase === 'waiting') upNext = pickDrawer(G, G.planned);
+
+    // the scoreboard: everyone here, plus anyone who left with points
+    const players = G.order.filter((id) => here.includes(id) || (G.scores[id] || 0) > 0);
+
+    let recap = null;
+    if (G.recap && G.phase === 'turnEnd') {
+      recap = { ...G.recap, endAt: undefined };
+    } else if (G.recap && G.recap.reason === 'passed') {
+      recap = { round: G.recap.round, drawer: G.recap.drawer, reason: 'passed' };
+    }
+
     return {
       phase: G.phase,
-      players: G.players,
+      round: G.round,
+      players,
+      present: here,
       scores: G.scores,
-      turn: G.turn,
-      totalTurns: G.totalTurns,
       drawer: G.drawer,
+      drawerAway: G.drawer !== null && !here.includes(G.drawer),
+      upNext,
       role,
       options: G.phase === 'choosing' && role === 'drawer' ? G.options : null,
       word,
@@ -417,16 +506,9 @@ export const game = {
       timer,
       strokes: G.strokes,
       ink: Math.min(1, G.points / MAX_POINTS),
-      guessed: G.guessed,
       log: G.log,
-      recap: G.recap,
+      recap,
       mySeq: isPlayer ? G.seqs[playerID] || 0 : 0,
     };
-  },
-
-  endIf: ({ G }) => {
-    if (G.phase !== 'gameover') return;
-    const best = Math.max(...Object.values(G.scores));
-    return { winners: G.players.filter((id) => G.scores[id] === best) };
   },
 };
